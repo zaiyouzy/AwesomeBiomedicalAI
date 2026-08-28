@@ -1,0 +1,35 @@
+{
+  "decision": "include",
+  "date": "2026MM",
+  "model_name": "",
+  "title": "",
+  "paper_url": "https://",
+  "doi": "",
+  "venue": "Nature ...",
+  "authors": [],
+  "model_type": "",
+  "backbone": "",
+  "model_size": {
+    "text": "",
+    "status": "not_reported",
+    "evidence": []
+  },
+  "training_data": {
+    "text": "",
+    "evidence": []
+  },
+  "training_adaptation": {
+    "text": "",
+    "evidence": []
+  },
+  "downstream_tasks": {
+    "text": "",
+    "evidence": []
+  },
+  "modalities": [],
+  "resources": [],
+  "performance": [],
+  "verification_note": "",
+  "supplement_url": null,
+  "notebooklm_url": null
+}

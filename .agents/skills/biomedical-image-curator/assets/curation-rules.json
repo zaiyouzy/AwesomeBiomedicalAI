@@ -1,0 +1,56 @@
+{
+  "target_page": "biomedical_images.md",
+  "target_year": 2026,
+  "allowed_journal_prefixes": ["Nature"],
+  "priority_journals": [
+    "Nature",
+    "Nature Medicine",
+    "Nature Methods",
+    "Nature Biomedical Engineering",
+    "Nature Communications"
+  ],
+  "ai_terms": [
+    "artificial intelligence",
+    "deep learning",
+    "foundation model",
+    "machine learning",
+    "neural network",
+    "vision transformer"
+  ],
+  "openalex_queries": [
+    "foundation model",
+    "deep learning",
+    "artificial intelligence",
+    "machine learning",
+    "vision transformer"
+  ],
+  "modality_terms": [
+    "ultrasound",
+    "ultrasonography",
+    "echocardiogram",
+    "echocardiography",
+    "microscopy",
+    "fluorescence microscopy",
+    "retinal imaging",
+    "retina",
+    "fundus",
+    "fundus photography",
+    "optical coherence tomography",
+    "OCT",
+    "dermatology",
+    "dermoscopy",
+    "endoscopy",
+    "cytology"
+  ],
+  "excluded_domains": [
+    "pathology",
+    "pathologist",
+    "computed tomography",
+    "CT imaging",
+    "magnetic resonance imaging",
+    "MRI",
+    "electronic health record",
+    "large language model",
+    "conversational AI"
+  ]
+}
