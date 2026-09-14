@@ -1,6 +1,77 @@
 {
   "schema": "biomedical-images-other.reviewed-papers",
   "version": 1,
-  "updated": "2026-09-04",
-  "entries": []
+  "updated": "2026-09-14",
+  "entries": [
+    {
+      "identifier": "10.1038/s41467-026-76287-9",
+      "identifier_type": "doi",
+      "status": "accepted",
+      "reviewed_at": "2026-09-14",
+      "reason": "Added to biomedical_images.md as SFibAI. First-online 2026-08-21, participant-level train/test counts, training method and performance verified from the final article and supplement; code and sample-data release verified from official repositories."
+    },
+    {
+      "identifier": "10.1038/s41467-026-76355-0",
+      "identifier_type": "doi",
+      "status": "accepted",
+      "reviewed_at": "2026-09-14",
+      "reason": "Added as AI4AB. First-online 2026-09-08, ImageNet-initialised training design and performance verified from the final article and supplement; official code, safetensors weights, BioImage Archive and Zenodo records verified."
+    },
+    {
+      "identifier": "10.1038/s41467-026-77102-1",
+      "identifier_type": "doi",
+      "status": "accepted",
+      "reviewed_at": "2026-09-14",
+      "reason": "Added as the RETFound age model. First-online 2026-08-26, cohort counts, five-fold training design and UK Biobank/Rotterdam performance verified from the final article and supplement; official code and archived release verified."
+    },
+    {
+      "identifier": "10.1038/s41467-026-77038-6",
+      "identifier_type": "doi",
+      "status": "excluded",
+      "reviewed_at": "2026-09-14",
+      "reason": "Engineering platform for extracellular-vesicle isolation and single-vesicle imaging; the only AI component is an ordinary random-forest classifier, so AI is not the paper's central contribution (policy excludes papers where AI is a minor analysis tool)."
+    },
+    {
+      "identifier": "10.1038/s41586-026-10979-6",
+      "identifier_type": "doi",
+      "status": "excluded",
+      "reviewed_at": "2026-09-14",
+      "reason": "WHOLISTIC whole-organism imaging and physiology platform; machine learning is one integrated component of an imaging method rather than the paper's central AI model or image-analysis contribution."
+    },
+    {
+      "identifier": "10.1038/s41467-026-77399-y",
+      "identifier_type": "doi",
+      "status": "excluded",
+      "reviewed_at": "2026-09-14",
+      "reason": "Computational neuroscience: a spiking neural network model of retinal processing trained on natural movies; no biomedical imaging modality and no clinical or scientific image-analysis method."
+    },
+    {
+      "identifier": "10.1038/d41586-026-02566-6",
+      "identifier_type": "doi",
+      "status": "excluded",
+      "reviewed_at": "2026-09-14",
+      "reason": "Nature News item (PubMed publication type 'News'), not a research article."
+    },
+    {
+      "identifier": "10.1038/d41586-026-02571-9",
+      "identifier_type": "doi",
+      "status": "excluded",
+      "reviewed_at": "2026-09-14",
+      "reason": "Nature comment/news item (d41586 DOI prefix, closed access, single author), not a research article."
+    },
+    {
+      "identifier": "10.1038/s41592-026-03201-y",
+      "identifier_type": "doi",
+      "status": "excluded",
+      "reviewed_at": "2026-09-14",
+      "reason": "Chemistry/assay methods paper on tyramide-oligonucleotide signal amplification for multiplexed spatial profiling; no AI model or image-analysis contribution (surfaced only through the title modality term 'multiplex')."
+    },
+    {
+      "identifier": "10.1038/s41467-026-76503-6",
+      "identifier_type": "doi",
+      "status": "excluded",
+      "reviewed_at": "2026-09-14",
+      "reason": "Human psychophysics study of saccade amplitude and post-saccadic visual sensitivity; no AI model and no imaging-analysis contribution."
+    }
+  ]
 }
