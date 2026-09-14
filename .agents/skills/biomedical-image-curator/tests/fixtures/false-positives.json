@@ -1,0 +1,85 @@
+{
+  "scope": "Known and representative false positives / out-of-scope candidates for deterministic regression. Each entry must record a rationale for its expected classification.",
+  "fixtures": [
+    {
+      "label": "MLLM-EDR",
+      "doi": "10.1038/s41467-026-75377-y",
+      "title": "Bootstrapping multimodal large language model with medical knowledge for automatic esophagogastroduodenoscopy diagnosis and reporting",
+      "journal": "Nature Communications",
+      "publication_date": "2026-07-01",
+      "abstract": "A multimodal large language model for endoscopy diagnosis and report generation.",
+      "expected": {"decision": "needs_review", "priority": "other_page"},
+      "rationale": "Primary contribution is an LLM/MLLM system; the current policy routes LLM/multimodal-large-language-model work away from this page even though endoscopy images are used. It is also already in the catalogue, so a live run would label it duplicate."
+    },
+    {
+      "label": "NBME-pathology-vision-language-model",
+      "doi": "10.1038/s41551-025-01574-7",
+      "title": "A multimodal vision-language model for generalizable annotation-free pathology localization",
+      "journal": "Nature Biomedical Engineering",
+      "publication_date": "2026-08-01",
+      "abstract": "",
+      "expected": {"decision": "needs_review", "priority": "other_page"},
+      "rationale": "Computational pathology (whole-slide) and a vision-language model: pathology and vision-language model exclusion terms both fire; page ownership belongs to the pathology catalogue page."
+    },
+    {
+      "label": "CT-radiology",
+      "doi": "10.1038/s41467-026-70000-1",
+      "title": "Deep learning denoising of low-dose computed tomography images",
+      "journal": "Nature Communications",
+      "publication_date": "2026-06-01",
+      "abstract": "",
+      "expected": {"decision": "needs_review", "priority": "other_page"},
+      "rationale": "Radiology (CT) is owned by the radiology catalogue page, not Biomedical Images - Other."
+    },
+    {
+      "label": "MRI-radiology",
+      "doi": "10.1038/s41467-026-70000-2",
+      "title": "A foundation model for magnetic resonance imaging super-resolution",
+      "journal": "Nature Communications",
+      "publication_date": "2026-05-01",
+      "abstract": "",
+      "expected": {"decision": "needs_review", "priority": "other_page"},
+      "rationale": "MRI/radiology belongs to the radiology catalogue page."
+    },
+    {
+      "label": "EHR-LLM",
+      "doi": "10.1038/s41467-026-70000-3",
+      "title": "Large language model summarization of electronic health record data",
+      "journal": "Nature Communications",
+      "publication_date": "2026-04-01",
+      "abstract": "",
+      "expected": {"decision": "needs_review", "priority": "other_page"},
+      "rationale": "EHR/longitudinal health data and LLM work are routed to other catalogue pages."
+    },
+    {
+      "label": "autonomous-cytopathology-pipeline",
+      "doi": "10.1038/s41586-025-10094-y",
+      "title": "Clinical-grade autonomous cytopathology through whole-slide edge tomography",
+      "journal": "Nature",
+      "publication_date": "2026-02-01",
+      "abstract": "",
+      "expected": {"decision": "needs_review", "priority": "other_page"},
+      "rationale": "Pathology-dominant whole-slide analysis must not be automatically accepted: the word 'pathology' occurs inside 'cytopathology', so the exclusion heuristic flags it for other-page review. Cytology itself remains potentially in scope, so a human decides; it is not auto-accepted and not auto-excluded. It is already in the catalogue, so a live run would also label it duplicate."
+    },
+    {
+      "label": "panderm-2025-year-gate",
+      "doi": "10.1038/s41591-025-03747-y",
+      "title": "A multimodal vision foundation model for clinical dermatology",
+      "journal": "Nature Medicine",
+      "publication_date": "2025-06-01",
+      "abstract": "",
+      "expected": {"decision": "exclude", "priority": "high"},
+      "rationale": "Dermoscopy scope is fine (high priority signal), but first online was 2025, so the deterministic year gate excludes it from 2026 discovery. Older catalogue records are retained but are not new-discovery targets."
+    },
+    {
+      "label": "conference-ieee-preprint",
+      "doi": "",
+      "title": "Retinal vessel segmentation with deep learning",
+      "journal": "arXiv preprint arXiv:2601.00001",
+      "publication_date": "2026-01-01",
+      "abstract": "",
+      "expected": {"decision": "exclude", "priority": "high"},
+      "rationale": "Preprint-only sources (arXiv) and conference/IEEE venues are outside the Nature-journal target; the journal gate excludes the record deterministically."
+    }
+  ]
+}

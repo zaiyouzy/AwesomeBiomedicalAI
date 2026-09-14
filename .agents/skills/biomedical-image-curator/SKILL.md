@@ -11,7 +11,8 @@ Maintain the repository's `biomedical_images.md` without weakening its current e
 
 - **Check one paper:** resolve a paper URL or DOI, pre-screen year/journal, and check duplicates.
 - **Check a link batch:** accept one URL/DOI per line, including links copied from Scholar Labs.
-- **Discover candidates:** query PubMed plus a lightweight OpenAlex freshness layer for the configured 2026 Nature-journal scope, then semantically review the returned candidates.
+- **Discover candidates (v2):** run `discover-v2` — a rolling 21-day window with two complementary PubMed passes plus abstracts, first-online date verification, an optional failure-tolerant OpenAlex sweep, a compact review queue (default ≤10) and a full raw audit. See [references/discovery-v2.md](references/discovery-v2.md). Read candidates from the queue only; raw candidates stay in the audit artifact and are never stored in the reviewed-papers ledger.
+- **Record a decision:** append accepted/excluded/other_page decisions for reviewed DOIs to `assets/reviewed-papers.json` (human-reviewed, Git-tracked; the automation only reads it).
 - **Render a record:** validate a completed paper JSON record and generate an overview row plus expandable detail card.
 
 Use the deterministic helper from the repository root:
@@ -25,7 +26,7 @@ The helper uses only the Python standard library. It writes draft artifacts unde
 ## Shared workflow
 
 1. Locate the repository root containing `biomedical_images.md`.
-2. For a paper link or DOI, run `check`. For Scholar Labs results, save one link per line and run `import-links`. For database discovery, run `discover`.
+2. For a paper link or DOI, run `check`. For Scholar Labs results, save one link per line and run `import-links`. For database discovery, run `discover-v2` (rolling window, review queue + raw audit). The older whole-year `discover` command still exists only for backward compatibility and benchmarks.
    In discovery output, review `high` first and then `medium`. `low` and `other_page` are advisory queues, not automatic exclusions.
 3. Stop immediately on `duplicate` or deterministic `exclude` unless the user asks for an audit.
 4. For `needs_review`, read the paper, supplementary material, official code, official weights, and formal data records as available.

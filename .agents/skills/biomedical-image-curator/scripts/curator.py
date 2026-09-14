@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import sys
+import time
 from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlparse
@@ -59,6 +60,17 @@ def load_rules() -> dict[str, Any]:
         return json.load(handle)
 
 
+def journal_clause(rules: dict[str, Any]) -> str:
+    return " OR ".join(f'"{journal}"[Journal]' for journal in rules["priority_journals"])
+
+
+def not_types_clause() -> str:
+    return (
+        "Editorial[Publication Type] OR Comment[Publication Type] OR "
+        "Letter[Publication Type] OR Published Erratum[Publication Type]"
+    )
+
+
 def find_repo_root(start: Path | None = None) -> Path:
     candidates = [start.resolve()] if start else []
     candidates.extend(Path(__file__).resolve().parents)
@@ -74,12 +86,28 @@ def find_repo_root(start: Path | None = None) -> Path:
 
 def request_text(url: str, timeout: int = 30) -> str:
     request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/json"})
-    try:
-        with urlopen(request, timeout=timeout) as response:
-            encoding = response.headers.get_content_charset() or "utf-8"
-            return response.read().decode(encoding, errors="replace")
-    except (HTTPError, URLError, TimeoutError) as exc:
-        raise CuratorError(f"Request failed for {url}: {exc}") from exc
+    last_error: Exception | None = None
+    for attempt in range(5):
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                encoding = response.headers.get_content_charset() or "utf-8"
+                return response.read().decode(encoding, errors="replace")
+        except HTTPError as exc:
+            last_error = exc
+            # Transient provider limits: NCBI/Crossref/OpenAlex send HTTP 429
+            # and occasional 5xx; back off and retry a few times.
+            if exc.code == 429 or exc.code >= 500:
+                if attempt < 4:
+                    time.sleep(2 * (attempt + 1))
+                    continue
+            break
+        except (URLError, TimeoutError) as exc:
+            last_error = exc
+            if attempt < 4:
+                time.sleep(2 * (attempt + 1))
+                continue
+            break
+    raise CuratorError(f"Request failed for {url}: {last_error}") from last_error
 
 
 def request_json(url: str, timeout: int = 30) -> dict[str, Any]:
@@ -130,9 +158,10 @@ def date_from_parts(value: Any) -> tuple[str, str]:
     return (f"{year:04d}-{month:02d}" if month else f"{year:04d}"), (f"{year:04d}{month:02d}" if month else "")
 
 
-def crossref_metadata(doi: str) -> dict[str, Any]:
+def crossref_metadata(doi: str, fetch_json=None) -> dict[str, Any]:
     url = f"https://api.crossref.org/works/{quote(doi, safe='')}"
-    message = request_json(url).get("message")
+    loader = fetch_json if fetch_json is not None else request_json
+    message = loader(url).get("message")
     if not isinstance(message, dict):
         raise CuratorError(f"Crossref returned no work metadata for {doi}")
     publication_date = yyyymm = date_source = ""
@@ -161,9 +190,10 @@ def crossref_metadata(doi: str) -> dict[str, Any]:
     }
 
 
-def publisher_metadata(url: str) -> dict[str, Any]:
+def publisher_metadata(url: str, fetch_text=None) -> dict[str, Any]:
+    loader = fetch_text if fetch_text is not None else request_text
     parser = CitationMetaParser()
-    parser.feed(request_text(url))
+    parser.feed(loader(url))
     meta = parser.meta
     publication = first(meta.get("citation_online_date")) or first(meta.get("citation_publication_date"))
     date = ""
@@ -426,35 +456,41 @@ def candidate_stem(metadata: dict[str, Any]) -> str:
 
 
 def pubmed_query(rules: dict[str, Any], year: int) -> str:
-    journals = " OR ".join(f'"{journal}"[Journal]' for journal in rules["priority_journals"])
-    ai_terms = " OR ".join(f'"{term}"[Title/Abstract]' for term in rules["ai_terms"])
-    modalities = " OR ".join(f'"{term}"[Title/Abstract]' for term in rules["modality_terms"])
+    """Legacy whole-year query, byte-stable for the original MVP/benchmark."""
+    journals = journal_clause(rules)
+    legacy = rules.get("legacy_pubmed_query") or {}
+    ai_terms = " OR ".join(f'"{term}"[Title/Abstract]' for term in (legacy.get("ai_terms") or rules["ai_terms"]))
+    modalities = " OR ".join(f'"{term}"[Title/Abstract]' for term in (legacy.get("modality_terms") or rules["modality_terms"]))
     dates = f'"{year}/01/01"[Date - Publication] : "{year}/12/31"[Date - Publication]'
-    excluded_types = "Editorial[Publication Type] OR Comment[Publication Type] OR Letter[Publication Type] OR Published Erratum[Publication Type]"
+    excluded_types = not_types_clause()
     return f"(({ai_terms}) AND ({modalities})) AND ({journals}) AND ({dates}) NOT ({excluded_types})"
 
 
-def pubmed_discover(rules: dict[str, Any], year: int, maximum: int) -> list[dict[str, Any]]:
+def pubmed_search_ids(term: str, maximum: int, email: str = "", fetch_json=None) -> list[str]:
     parameters = {
         "db": "pubmed", "retmode": "json", "retmax": str(maximum),
-        "sort": "pub date", "term": pubmed_query(rules, year),
+        "sort": "pub date", "term": term,
         "tool": "AwesomeBiomedicalAI-curator",
     }
-    email = os.environ.get("NCBI_EMAIL", "").strip()
     if email:
         parameters["email"] = email
+    loader = fetch_json if fetch_json is not None else request_json
     search_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?" + urlencode(parameters)
-    ids = request_json(search_url).get("esearchresult", {}).get("idlist", [])
-    if not ids:
+    return loader(search_url).get("esearchresult", {}).get("idlist", [])
+
+
+def pubmed_summary_records(pmids: list[str], email: str = "", fetch_json=None) -> list[dict[str, Any]]:
+    if not pmids:
         return []
+    loader = fetch_json if fetch_json is not None else request_json
     summary_parameters = {
-        "db": "pubmed", "retmode": "json", "id": ",".join(ids),
+        "db": "pubmed", "retmode": "json", "id": ",".join(pmids),
         "tool": "AwesomeBiomedicalAI-curator",
     }
     if email:
         summary_parameters["email"] = email
     summary_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?" + urlencode(summary_parameters)
-    result = request_json(summary_url).get("result", {})
+    result = loader(summary_url).get("result", {})
     papers = []
     for pmid in result.get("uids", []):
         item = result.get(str(pmid), {})
@@ -476,8 +512,16 @@ def pubmed_discover(rules: dict[str, Any], year: int, maximum: int) -> list[dict
             "date_source": "PubMed publication summary; verify first-online month",
             "paper_url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
             "metadata_source": summary_url,
-            "discovery_sources": ["PubMed"],
         })
+    return papers
+
+
+def pubmed_discover(rules: dict[str, Any], year: int, maximum: int) -> list[dict[str, Any]]:
+    email = os.environ.get("NCBI_EMAIL", "").strip()
+    ids = pubmed_search_ids(pubmed_query(rules, year), maximum, email=email)
+    papers = pubmed_summary_records(ids, email=email)
+    for paper in papers:
+        paper["discovery_sources"] = ["PubMed"]
     return papers
 
 
@@ -545,6 +589,18 @@ def deduplicate_discovery(papers: list[dict[str, Any]]) -> list[dict[str, Any]]:
             *paper.get("discovery_sources", []),
         ]))
         existing["discovery_sources"] = sources
+        seen_passes = existing.get("retrieval_pass")
+        new_pass = paper.get("retrieval_pass")
+        if new_pass and seen_passes != new_pass:
+            if isinstance(seen_passes, str):
+                merged_passes = [seen_passes]
+            elif isinstance(seen_passes, list):
+                merged_passes = list(seen_passes)
+            else:
+                merged_passes = []
+            if new_pass not in merged_passes:
+                merged_passes.append(new_pass)
+            existing["retrieval_pass"] = merged_passes
         for field in ("doi", "doi_url", "title", "journal", "publication_date", "date", "paper_url"):
             if not existing.get(field) and paper.get(field):
                 existing[field] = paper[field]
@@ -872,6 +928,16 @@ def command_index(args: argparse.Namespace, repo_root: Path) -> None:
     }, ensure_ascii=False, indent=2))
 
 
+def command_discover_v2(args: argparse.Namespace, repo_root: Path) -> None:
+    from discovery import run_discovery_v2_cli  # local import avoids a circular dependency
+    run_discovery_v2_cli(args, repo_root)
+
+
+def command_validate_ledger(args: argparse.Namespace, repo_root: Path) -> None:
+    from discovery import validate_ledger_cli  # local import avoids a circular dependency
+    validate_ledger_cli(args, repo_root)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Biomedical Images — Other curation helper")
     parser.add_argument("--repo", type=Path, help="Repository root containing biomedical_images.md")
@@ -894,6 +960,24 @@ def build_parser() -> argparse.ArgumentParser:
     discover.add_argument("--source", choices=("all", "pubmed", "openalex"), default="all")
     discover.add_argument("--output", type=Path)
     discover.set_defaults(handler=command_discover)
+
+    v2 = subparsers.add_parser(
+        "discover-v2",
+        help="Deterministic discovery v2: rolling window, two-pass PubMed, abstracts, "
+             "first-online verification, review queue and raw audit",
+    )
+    v2.add_argument("--source", choices=("all", "pubmed", "openalex"), default="all")
+    v2.add_argument("--queue-limit", type=int, help="Cap for the review queue (default: rules discovery.scheduled_queue_limit)")
+    v2.add_argument("--window-days", type=int, help="Rolling window length in days (default: rules)")
+    v2.add_argument("--overlap-days", type=int, help="Overlap added to the window (default: rules)")
+    v2.add_argument("--full-year", action="store_true", help="Retrospective mode: search the whole target year")
+    v2.add_argument("--ledger", type=Path, help="Path to the reviewed-papers ledger (default: rules discovery.ledger_relative)")
+    v2.add_argument("--prefix", default=".curator/weekly", help="Output stem for review-queue/raw-audit/summary files")
+    v2.set_defaults(handler=command_discover_v2)
+
+    ledger_check = subparsers.add_parser("validate-ledger", help="Validate a reviewed-papers ledger file")
+    ledger_check.add_argument("ledger", nargs="?", type=Path, help="Ledger path (default: rules discovery.ledger_relative)")
+    ledger_check.set_defaults(handler=command_validate_ledger)
 
     validate = subparsers.add_parser("validate", help="Validate a completed paper record JSON")
     validate.add_argument("record", type=Path)
