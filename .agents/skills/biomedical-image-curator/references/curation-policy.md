@@ -21,6 +21,16 @@ Read this file before deciding whether a candidate belongs in `biomedical_images
 
 When page ownership is ambiguous, return `needs_review` and explain the competing pages. Do not force a binary decision.
 
+Automated classification notes (used by `discover-v2` fixtures and gates):
+
+- LLM/MLLM-primary work (for example MLLM-EDR) is treated as `other_page`
+  because its primary contribution is the language/multimodal system.
+- Cytology itself remains potentially in scope, but pathology-dominant
+  whole-slide analysis is **not automatically accepted**; ambiguous cases
+  stay `needs_review` and are flagged `other_page` so a human decides.
+- Every regression fixture in `tests/fixtures/` records the reason for its
+  expected classification.
+
 ## Required record content
 
 - First-online month as `YYYYMM`.
@@ -43,6 +53,19 @@ When page ownership is ambiguous, return `needs_review` and explain the competin
 5. Official project page, used only for claims it directly supports.
 
 Search results, Scholar Labs descriptions, third-party summaries, lab homepages, and inferred architecture defaults are discovery aids, not detailed-field evidence.
+
+First-online verification hierarchy (deterministic stage, `discover-v2`):
+
+1. Official Nature article page citation metadata.
+2. Crossref `published-online` metadata.
+3. PubMed electronic publication metadata.
+4. Unresolved → the candidate is sent for manual verification.
+
+Store the provenance per candidate. If trustworthy sources conflict, flag the
+candidate for review instead of silently choosing a date. Papers whose true
+first-online year is 2025 but whose issue year is 2026 are excluded as
+`before_target`; these traps are pinned as regression fixtures in
+`tests/fixtures/date-traps.json`.
 
 ## Model-size decisions
 

@@ -13,16 +13,15 @@
     "artificial intelligence",
     "deep learning",
     "foundation model",
+    "foundation models",
     "machine learning",
     "neural network",
-    "vision transformer"
-  ],
-  "openalex_queries": [
-    "foundation model",
-    "deep learning",
-    "artificial intelligence",
-    "machine learning",
-    "vision transformer"
+    "vision transformer",
+    "AI",
+    "generative model",
+    "generative models",
+    "diffusion model",
+    "diffusion models"
   ],
   "modality_terms": [
     "ultrasound",
@@ -31,6 +30,10 @@
     "echocardiography",
     "microscopy",
     "fluorescence microscopy",
+    "light-sheet microscopy",
+    "light sheet microscopy",
+    "light-sheet",
+    "3D microscopy",
     "retinal imaging",
     "retina",
     "fundus",
@@ -40,7 +43,14 @@
     "dermatology",
     "dermoscopy",
     "endoscopy",
-    "cytology"
+    "cytology",
+    "whole-body",
+    "spatial proteomics",
+    "mass cytometry",
+    "multiplex",
+    "surgical video",
+    "ophthalmic",
+    "virtual staining"
   ],
   "excluded_domains": [
     "pathology",
@@ -51,6 +61,65 @@
     "MRI",
     "electronic health record",
     "large language model",
-    "conversational AI"
-  ]
+    "conversational AI",
+    "vision-language model",
+    "multimodal large language model"
+  ],
+  "openalex_queries": [
+    "foundation model",
+    "deep learning",
+    "artificial intelligence",
+    "machine learning",
+    "vision transformer"
+  ],
+  "legacy_pubmed_query": {
+    "ai_terms": [
+      "artificial intelligence",
+      "deep learning",
+      "foundation model",
+      "machine learning",
+      "neural network",
+      "vision transformer"
+    ],
+    "modality_terms": [
+      "ultrasound",
+      "ultrasonography",
+      "echocardiogram",
+      "echocardiography",
+      "microscopy",
+      "fluorescence microscopy",
+      "retinal imaging",
+      "retina",
+      "fundus",
+      "fundus photography",
+      "optical coherence tomography",
+      "OCT",
+      "dermatology",
+      "dermoscopy",
+      "endoscopy",
+      "cytology"
+    ]
+  },
+  "discovery": {
+    "window_days": 21,
+    "overlap_days": 3,
+    "scheduled_queue_limit": 10,
+    "ledger_relative": ".agents/skills/biomedical-image-curator/assets/reviewed-papers.json",
+    "pass_retmax": 100,
+    "efetch_batch_size": 100,
+    "openalex": {
+      "enabled": true,
+      "per_page": 100,
+      "max_pages": 3,
+      "retry_seconds": 10,
+      "max_retries": 1
+    },
+    "journal_issns": {
+      "Nature": ["0028-0836", "1476-4687"],
+      "Nature Medicine": ["1078-8956", "1546-170X"],
+      "Nature Methods": ["1548-7091", "1548-7105"],
+      "Nature Biomedical Engineering": ["2157-846X"],
+      "Nature Communications": ["2041-1723"]
+    }
+  }
 }

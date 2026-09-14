@@ -11,22 +11,24 @@ on:
       source:
         description: Discovery source
         required: true
-        default: pubmed
+        default: all
         type: choice
         options:
           - pubmed
           - openalex
           - all
-      max_results:
-        description: Maximum results per database query
+      queue_limit:
+        description: Maximum number of new high/medium candidates in the review queue
         required: true
-        default: "100"
+        default: "10"
         type: choice
         options:
+          - "5"
+          - "10"
+          - "25"
           - "50"
-          - "100"
 
-# The MVP can read the repository but cannot change it.
+# Deterministic discovery v2 is read-only: it cannot change the repository.
 permissions:
   contents: read
 
@@ -39,14 +41,14 @@ jobs:
     # Fork-only safety guard. If this file is copied upstream, the job is skipped.
     if: github.repository == 'zaiyouzy/AwesomeBiomedicalAI'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -57,40 +59,41 @@ jobs:
           -p "test_*.py"
           -v
 
-      - name: Discover candidate papers
+      - name: Discover candidate papers (v2)
         env:
-          DISCOVERY_SOURCE: ${{ inputs.source || 'pubmed' }}
-          MAX_RESULTS: ${{ inputs.max_results || '100' }}
+          DISCOVERY_SOURCE: ${{ inputs.source || 'all' }}
+          QUEUE_LIMIT: ${{ inputs.queue_limit || '10' }}
           NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
           OPENALEX_API_KEY: ${{ secrets.OPENALEX_API_KEY }}
         run: |
           mkdir -p .curator
           python .agents/skills/biomedical-image-curator/scripts/curator.py \
             --repo . \
-            discover \
-            --year 2026 \
+            discover-v2 \
             --source "$DISCOVERY_SOURCE" \
-            --max "$MAX_RESULTS" \
-            --output .curator/weekly-discovery.json
+            --queue-limit "$QUEUE_LIMIT" \
+            --prefix .curator/weekly
 
-      - name: Show the candidate report in the run summary
+      - name: Show the report in the run summary
         if: success()
-        env:
-          DISCOVERY_SOURCE: ${{ inputs.source || 'pubmed' }}
         run: |
-          echo "## Biomedical Images — Other" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Discovery source:** $DISCOVERY_SOURCE" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          cat .curator/weekly-discovery.md >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## Biomedical Images — Other — deterministic discovery v2";
+            echo "";
+            cat .curator/weekly-summary.md;
+            echo "";
+            echo "**How to act on the queue:** download the biomedical-image-candidates artifact (30-day retention), open weekly-review-queue.md, verify each entry against the skill policy, and record your decisions in reviewed-papers.json (accepted/excluded/other_page) in a normal human-reviewed pull request. The workflow never edits the catalogue.";
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the candidate report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: biomedical-image-candidates-${{ github.run_number }}
           path: |
-            .curator/weekly-discovery.json
-            .curator/weekly-discovery.md
+            .curator/weekly-review-queue.json
+            .curator/weekly-review-queue.md
+            .curator/weekly-raw-audit.json
+            .curator/weekly-summary.md
           if-no-files-found: warn
           retention-days: 30

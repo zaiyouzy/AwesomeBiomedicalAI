@@ -1,0 +1,41 @@
+{
+  "scope": "First-online date traps: records that PubMed/print metadata may show with a 2026 issue year but whose true first-online date is 2025. These must be excluded by the deterministic year gate after first-online verification, never silently accepted with the issue year. Entries 1-2 use real Crossref metadata retrieved 2026-09-04; entry 3 is a labelled synthetic conflict pattern.",
+  "fixtures": [
+    {
+      "label": "real-nature-2025online-2026print-1",
+      "doi": "10.1038/s41586-025-09823-0",
+      "title": "Video-call glitches trigger uncanniness and harm consequential life outcomes",
+      "journal": "Nature",
+      "publication_date": "2026 Feb 12",
+      "crossref_online": "2025-12-03",
+      "crossref_print": "2026-02-12",
+      "publisher_online": "",
+      "expected": {"first_online": "202512", "date_status": "verified", "gate_decision": "exclude", "gate_status": "before_target"},
+      "rationale": "Real Crossref record: published online 2025-12-03, assigned to the 2026-02-12 issue. PubMed/print metadata alone would suggest 2026; after Crossref published-online verification the deterministic gate must exclude it as before_target. Scope (psychology, not imaging) is irrelevant here: this fixture guards the date logic."
+    },
+    {
+      "label": "real-nature-2025online-2026print-2",
+      "doi": "10.1038/s41586-025-09812-3",
+      "title": "Whole-genome landscapes of 1,364 breast cancers",
+      "journal": "Nature",
+      "publication_date": "2026 Jan 29",
+      "crossref_online": "2025-12-03",
+      "crossref_print": "2026-01-29",
+      "publisher_online": "",
+      "expected": {"first_online": "202512", "date_status": "verified", "gate_decision": "exclude", "gate_status": "before_target"},
+      "rationale": "Real Crossref record: published online 2025-12-03, issue 2026-01-29. Guards the same before_target exclusion with a second real DOI."
+    },
+    {
+      "label": "synthetic-conflict-2025online-vs-2026page",
+      "doi": "10.1038/s41467-026-70000-9",
+      "title": "Synthetic conflict pattern: a foundation model for retinal ultrasound imaging",
+      "journal": "Nature Communications",
+      "publication_date": "2026 Feb 01",
+      "crossref_online": "2025-11-27",
+      "crossref_print": "2026-02-01",
+      "publisher_online": "2026-01-10",
+      "expected": {"first_online": "202511", "date_status": "conflict", "gate_decision": "exclude", "gate_status": "before_target"},
+      "rationale": "Labelled synthetic pattern: the Crossref published-online date (2025-11-27) disagrees with a fabricated publisher-page date (2026-01-10). The verifier must flag the conflict and keep both dates in provenance; because the earliest verified month is 2025, the deterministic gate still excludes the record as before_target instead of silently picking either date."
+    }
+  ]
+}
