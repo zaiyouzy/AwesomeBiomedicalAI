@@ -723,8 +723,19 @@ def render_summary_markdown(payload: dict[str, Any], queue: list[dict[str, Any]]
         f"| needs_review | {counts.get('needs_review', 0)} |",
         f"| duplicates (already in catalogue) | {counts.get('duplicate', 0)} |",
         f"| excluded | {counts.get('exclude', 0)} |",
+        f"| high-priority candidates (AI + modality) | {payload.get('priority_counts', {}).get('high', 0)} |",
+        f"| not queued (only one side matched) | "
+        f"{payload.get('signal_mix', {}).get('ai_only', 0) + payload.get('signal_mix', {}).get('modality_only', 0)} |",
         f"| suppressed by reviewed-papers ledger | {payload.get('ledger_suppressed', 0)} |",
         f"| Review queue size | {payload.get('queue_size', 0)} |",
+        "",
+        "Queue admission: "
+        + ("an AI term **and** an imaging-modality term are both required"
+           if payload.get("queue_admission", {}).get("require_ai_and_modality")
+           else "high/medium priority is sufficient")
+        + ("; Nature news/commentary DOIs are never queued"
+           if payload.get("queue_admission", {}).get("excluded_doi_prefixes") else "")
+        + ". Everything else stays visible in the raw audit.",
         "",
         "## Queue",
         "",
@@ -763,6 +774,39 @@ def render_summary_markdown(payload: dict[str, Any], queue: list[dict[str, Any]]
 # ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
+
+def queue_eligible(
+    result: dict[str, Any], rules: dict[str, Any], cfg: dict[str, Any] | None = None
+) -> bool:
+    """Decide whether a candidate may enter the human review queue.
+
+    Queue admission is deliberately stricter than the audit: by default a
+    candidate needs *both* an AI term and an imaging-modality term, and
+    Nature news/commentary DOIs are never queued (they stay in the raw
+    audit).  Everything else remains visible in the audit artifact.
+    """
+    cfg = cfg if cfg is not None else discovery_config(rules)
+    if result.get("decision") != "needs_review":
+        return False
+    if result.get("review_priority") not in ("high", "medium"):
+        return False
+    if result.get("ledger_status"):
+        return False
+    if result.get("date_status") not in (
+            "verified", "conflict", "unresolved", "pubmed_electronic_only", "not_verified"):
+        return False
+    if bool(cfg.get("queue_requires_ai_and_modality", False)):
+        signals = result.get("signals") or {}
+        if not (signals.get("ai_title") or signals.get("ai_abstract")):
+            return False
+        if not (signals.get("modality_title") or signals.get("modality_abstract")):
+            return False
+    doi = curator.normalize_doi(str((result.get("metadata") or {}).get("doi") or ""))
+    prefixes = tuple(str(prefix).casefold() for prefix in (cfg.get("queue_excluded_doi_prefixes") or []))
+    if prefixes and doi and doi.casefold().startswith(prefixes):
+        return False
+    return True
+
 
 def first_online_gate(
     first_online: str,
@@ -940,11 +984,27 @@ def run_discovery_v2(
         if result["decision"] == "needs_review" and result["review_priority"] in ("high", "medium")
     ]
     ledger_suppressed = sum(1 for result in suppressable if result["ledger_status"])
-    queue_candidates = [
-        result for result in suppressable
-        if not result["ledger_status"] and result["date_status"] in (
-            "verified", "conflict", "unresolved", "pubmed_electronic_only", "not_verified")
-    ]
+    queue_candidates = [result for result in suppressable if queue_eligible(result, rules, cfg)]
+
+    signal_mix = {"both": 0, "ai_only": 0, "modality_only": 0, "neither": 0}
+    for result in results:
+        if result["decision"] != "needs_review":
+            continue
+        signals = result["signals"]
+        has_ai = bool(signals.get("ai_title") or signals.get("ai_abstract"))
+        has_modality = bool(signals.get("modality_title") or signals.get("modality_abstract"))
+        if has_ai and has_modality:
+            signal_mix["both"] += 1
+        elif has_ai:
+            signal_mix["ai_only"] += 1
+        elif has_modality:
+            signal_mix["modality_only"] += 1
+        else:
+            signal_mix["neither"] += 1
+    queue_admission = {
+        "require_ai_and_modality": bool(cfg.get("queue_requires_ai_and_modality", False)),
+        "excluded_doi_prefixes": list(cfg.get("queue_excluded_doi_prefixes") or []),
+    }
     queue_candidates.sort(key=lambda item: (0 if item["review_priority"] == "high" else 1,
                                             item["first_online"] or "", item["candidate_id"]))
     limit = int(queue_limit) if queue_limit is not None else int(cfg.get("scheduled_queue_limit", 10))
@@ -974,6 +1034,8 @@ def run_discovery_v2(
         "counts": {"total": len(results), **decision_counts},
         "priority_counts": priority_counts,
         "date_status_counts": date_status_counts,
+        "signal_mix": signal_mix,
+        "queue_admission": queue_admission,
         "ledger_suppressed": ledger_suppressed,
         "queue_size": len(queued),
         "queue": [queue_entry(result) for result in queued],
