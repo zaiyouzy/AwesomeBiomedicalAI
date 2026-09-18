@@ -40,6 +40,34 @@ Every Monday (and on demand from the Actions page) the read-only workflow:
 8. Writes a **compact review queue** (default max 10 new high/medium
    candidates) plus a **complete raw audit** and a human-readable summary.
 
+### Queue admission (tightened after run #8)
+
+The audit keeps every candidate, but the **queue** is deliberately strict so
+the limited slots are not spent on obvious non-candidates. A candidate is
+queued only when all of these hold:
+
+- it still needs review (not a duplicate, not deterministically excluded, not
+  already decided in `reviewed-papers.json`);
+- it matches **an AI term and an imaging-modality term** (both sides);
+- it is not a Nature news/commentary DOI (`10.1038/d41586-`).
+
+Everything else — one-sided matches, news, low-priority and other-page items —
+stays visible in `weekly-raw-audit.json` with its reason, so nothing is
+silently dropped. The summary reports `high-priority candidates` and
+`not queued (only one side matched)` so these numbers stay transparent.
+
+Why this exists: in run #8 the queue of ten contained five Nature
+news/commentary pieces, two materials-science papers, a parasitology paper and
+a therapeutics paper — all correctly rejected by the AI afterwards. With the
+stricter admission the same window produced three genuine imaging+AI
+candidates. The modality vocabulary also gained cryo-electron
+microscopy/tomography, brightfield, expansion/confocal microscopy,
+two-photon, intravital, photoacoustic, elastography and capsule-endoscopy
+terms, which recovered a cryo-ET deep-learning tool that was previously
+missed. Both settings live in the `discovery` block of
+`assets/curation-rules.json` (`queue_requires_ai_and_modality`,
+`queue_excluded_doi_prefixes`).
+
 ## Outputs (all under `.curator/`, uploaded as an artifact for 30 days)
 
 | File | Contents |
