@@ -938,6 +938,11 @@ def command_validate_ledger(args: argparse.Namespace, repo_root: Path) -> None:
     validate_ledger_cli(args, repo_root)
 
 
+def command_ai_review(args: argparse.Namespace, repo_root: Path) -> None:
+    from discovery import ai_review_cli  # local import avoids a circular dependency
+    ai_review_cli(args, repo_root)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Biomedical Images — Other curation helper")
     parser.add_argument("--repo", type=Path, help="Repository root containing biomedical_images.md")
@@ -978,6 +983,17 @@ def build_parser() -> argparse.ArgumentParser:
     ledger_check = subparsers.add_parser("validate-ledger", help="Validate a reviewed-papers ledger file")
     ledger_check.add_argument("ledger", nargs="?", type=Path, help="Ledger path (default: rules discovery.ledger_relative)")
     ledger_check.set_defaults(handler=command_validate_ledger)
+
+    ai = subparsers.add_parser(
+        "ai-review",
+        help="Optional DeepSeek first-pass screening of the weekly review queue "
+             "(read-only, hard-capped; never edits the catalogue or the ledger)",
+    )
+    ai.add_argument("--queue", type=Path, help="Review queue JSON (default: <prefix>-review-queue.json)")
+    ai.add_argument("--prefix", default=".curator/weekly", help="Output stem for the ai-review files")
+    ai.add_argument("--max-candidates", type=int, help="Per-run candidate cap (never above the configured cap)")
+    ai.add_argument("--dry-run", action="store_true", help="Build prompts and write a report without calling the API")
+    ai.set_defaults(handler=command_ai_review)
 
     validate = subparsers.add_parser("validate", help="Validate a completed paper record JSON")
     validate.add_argument("record", type=Path)

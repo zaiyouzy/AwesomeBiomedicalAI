@@ -121,5 +121,23 @@
       "Nature Biomedical Engineering": ["2157-846X"],
       "Nature Communications": ["2041-1723"]
     }
+  },
+  "ai": {
+    "enabled": true,
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-flash",
+    "env_api_key": "DEEPSEEK_API_KEY",
+    "max_candidates_per_run": 10,
+    "max_requests_per_run": 12,
+    "max_retries": 1,
+    "retry_seconds": 2,
+    "max_abstract_chars": 1800,
+    "max_input_chars_per_candidate": 6000,
+    "max_output_tokens": 700,
+    "temperature": 0,
+    "thinking": "disabled",
+    "timeout_seconds": 60,
+    "price_input_per_mtok": 0.3,
+    "price_output_per_mtok": 1.2
   }
 }

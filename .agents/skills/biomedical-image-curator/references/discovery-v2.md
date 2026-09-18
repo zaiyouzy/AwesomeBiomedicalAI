@@ -51,6 +51,54 @@ Every Monday (and on demand from the Actions page) the read-only workflow:
 
 Nothing is ever pushed to `main`: this workflow has `contents: read` only.
 
+## AI first-pass review (optional, read-only, hard-capped)
+
+After the queue is written, the same workflow can ask DeepSeek to screen the
+compact queue (title, journal, first-online month, abstract snippet and the
+URLs already present in the candidate record). It returns strict JSON per
+candidate:
+
+- `decision` — `include`, `exclude` or `needs_human_review`
+- `confidence`, `reason`, `scope_category`, `date_status`
+- `evidence_urls` — only URLs that appeared in the candidate record; any URL
+  the model invents is dropped and reported under `uncertainties`
+- `uncertainties`
+
+Outputs: `weekly-ai-review.json` and `weekly-ai-review.md`, uploaded in the
+same artifact and appended to the run summary. **The AI only advises** — a
+maintainer still verifies the paper and records `accepted` / `excluded` /
+`other_page` in `reviewed-papers.json` before anything changes.
+
+One-time setup in your fork:
+
+1. Create a DeepSeek API key at `platform.deepseek.com` and top up a small
+   balance (for example $5). The prepaid balance is the hard spending cap.
+2. Add it as a repository secret named `DEEPSEEK_API_KEY`
+   (Settings → Secrets and variables → Actions). Never commit the key.
+3. Optionally trigger the workflow once with `workflow_dispatch` to confirm
+   the AI section appears in the summary.
+
+Only public metadata and abstract snippets are sent; no credentials, no
+private data, no candidate files. Cost and hard limits live in the `ai` block
+of `assets/curation-rules.json`:
+
+- model `deepseek-flash`, thinking mode disabled, JSON output, temperature 0
+- at most 10 candidates and 12 requests per run
+- per-candidate input truncated to 6,000 characters; abstracts to 1,800
+- at most 700 output tokens per request, with one retry on an invalid reply
+- each run records token usage and an estimated cost (upper-bound peak
+  pricing); a typical 10-candidate week is well under $0.01
+- a missing secret or an API failure never fails the run: the deterministic
+  queue is still produced and the report says `skipped_no_api_key` or records
+  the per-candidate error
+
+Check it locally without spending anything (no API call, no key needed):
+
+```text
+python .agents/skills/biomedical-image-curator/scripts/curator.py \
+  --repo . ai-review --dry-run --queue .curator/weekly-review-queue.json --prefix .curator/weekly
+```
+
 ## How to act on a queue
 
 1. Open the Actions run and download the `biomedical-image-candidates-N`
