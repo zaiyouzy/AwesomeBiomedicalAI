@@ -38,7 +38,9 @@ import re
 import time
 from pathlib import Path
 from typing import Any, Callable
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
 
 import curator  # same directory; tests add scripts/ to sys.path
@@ -1057,6 +1059,415 @@ def benchmark_recall(raw: list[dict[str, Any]], merged: list[dict[str, Any]], ex
 
 
 # ---------------------------------------------------------------------------
+# AI first-pass review (optional, read-only, hard-capped)
+# ---------------------------------------------------------------------------
+
+AI_DECISIONS = {"include", "exclude", "needs_human_review"}
+AI_DEFAULT_CONFIG: dict[str, Any] = {
+    "enabled": True,
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-flash",
+    "env_api_key": "DEEPSEEK_API_KEY",
+    "max_candidates_per_run": 10,
+    "max_requests_per_run": 12,
+    "max_retries": 1,
+    "retry_seconds": 2,
+    "max_abstract_chars": 1800,
+    "max_input_chars_per_candidate": 6000,
+    "max_output_tokens": 700,
+    "temperature": 0,
+    "thinking": "disabled",
+    "timeout_seconds": 60,
+    "price_input_per_mtok": 0.3,
+    "price_output_per_mtok": 1.2,
+}
+
+
+def ai_config(rules: dict[str, Any]) -> dict[str, Any]:
+    cfg = dict(AI_DEFAULT_CONFIG)
+    cfg.update(rules.get("ai") or {})
+    return cfg
+
+
+def scrub_secrets(text: Any) -> str:
+    """Remove anything that looks like an API key before it can be logged."""
+    return re.sub(r"sk-[A-Za-z0-9_\-]{4,}", "sk-***", str(text or ""))
+
+
+def ai_policy_brief(rules: dict[str, Any]) -> str:
+    journals = ", ".join(rules.get("priority_journals") or [])
+    modalities = ", ".join(rules.get("modality_terms") or [])
+    excluded = ", ".join(rules.get("excluded_domains") or [])
+    return (
+        f"Target: papers first published online in {rules.get('target_year')} in a Nature Portfolio "
+        f"journal whose displayed name begins with 'Nature' (priority journals: {journals}).\n"
+        "In scope: the paper's central contribution is an important AI model, system or image-analysis "
+        f"method whose primary data are biomedical images in these modalities: {modalities}.\n"
+        f"Out of scope: {excluded}; conference or IEEE papers; non-Nature venues; preprints used instead "
+        "of the published article; pathology-dominant, CT/MRI radiology, EHR/longitudinal or general "
+        "LLM/multimodal work; papers where AI is only a minor analysis tool."
+    )
+
+
+def ai_output_contract() -> str:
+    return (
+        "Reply with exactly one json object and nothing else (no markdown fences). Required shape:\n"
+        '{"candidate_id": "<echo the candidate_id>", "decision": "include" | "exclude" | '
+        '"needs_human_review", "confidence": 0.0, "reason": "one or two sentences", '
+        '"scope_category": "short label", "date_status": "verified | unresolved | conflict | implausible", '
+        '"evidence_urls": ["only urls listed in known_urls"], "uncertainties": ["short items"]}'
+    )
+
+
+def candidate_urls(candidate: dict[str, Any]) -> list[str]:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else candidate
+    urls = []
+    for value in (candidate.get("doi_url"), candidate.get("paper_url"),
+                  metadata.get("doi_url"), metadata.get("paper_url")):
+        if value:
+            urls.append(str(value))
+    doi = curator.normalize_doi(str(metadata.get("doi") or candidate.get("doi") or ""))
+    if doi:
+        urls.append(f"https://doi.org/{doi}")
+    return sorted({url.rstrip("/") for url in urls})
+
+
+def build_ai_messages(
+    candidate: dict[str, Any], rules: dict[str, Any], cfg: dict[str, Any]
+) -> tuple[list[dict[str, str]], list[str]]:
+    metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else candidate
+    allowed = candidate_urls(candidate)
+    payload = {
+        "candidate_id": candidate.get("candidate_id"),
+        "title": metadata.get("title") or candidate.get("title") or "",
+        "journal": metadata.get("journal") or candidate.get("journal") or "",
+        "first_online": candidate.get("first_online") or "",
+        "date_status": candidate.get("date_status") or "",
+        "retrieval_pass": metadata.get("retrieval_pass") or candidate.get("retrieval_pass") or "",
+        "abstract": truncate(str(metadata.get("abstract") or candidate.get("abstract") or ""),
+                             int(cfg["max_abstract_chars"])),
+        "known_urls": allowed,
+    }
+    system = (
+        "You screen candidate papers for a public catalogue page called 'Biomedical Images - Other'. "
+        "You only judge scope relevance and date plausibility; a human makes every final decision, so "
+        "use needs_human_review whenever the candidate is ambiguous.\n\n"
+        + ai_policy_brief(rules) + "\n\n" + ai_output_contract()
+    )
+    user = "Candidate json:\n" + json.dumps(payload, ensure_ascii=False, indent=2)
+    max_chars = int(cfg["max_input_chars_per_candidate"])
+    if len(user) > max_chars:
+        user = user[:max_chars]
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}], allowed
+
+
+def parse_ai_reply(text: Any, candidate_id: str, allowed_urls: list[str]) -> dict[str, Any]:
+    raw = str(text or "").strip()
+    if not raw:
+        raise curator.CuratorError("empty response content")
+    if raw.startswith("```"):
+        raw = re.sub(r"^```[A-Za-z]*\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw).strip()
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise curator.CuratorError(f"invalid json: {exc}") from exc
+    if not isinstance(data, dict):
+        raise curator.CuratorError("response is not a json object")
+    if str(data.get("candidate_id") or "") != str(candidate_id):
+        raise curator.CuratorError("candidate_id mismatch")
+    decision = str(data.get("decision") or "").strip()
+    if decision not in AI_DECISIONS:
+        raise curator.CuratorError(f"invalid decision '{decision}'")
+    reason = truncate(str(data.get("reason") or "").strip(), 600)
+    if not reason:
+        raise curator.CuratorError("reason is required")
+    confidence: float | None
+    try:
+        confidence = max(0.0, min(1.0, float(data.get("confidence"))))
+    except (TypeError, ValueError):
+        confidence = None
+    allowed = {url.rstrip("/") for url in allowed_urls}
+    kept: list[str] = []
+    dropped = 0
+    for url in data.get("evidence_urls") if isinstance(data.get("evidence_urls"), list) else []:
+        value = str(url).strip()
+        if not value:
+            continue
+        if value.rstrip("/") in allowed:
+            kept.append(value)
+        else:
+            dropped += 1
+    uncertainties = [truncate(str(item).strip(), 300)
+                     for item in (data.get("uncertainties") or [])
+                     if str(item).strip()][:6]
+    if dropped:
+        uncertainties.append(f"Dropped {dropped} evidence URL(s) that were not in the candidate record.")
+    return {
+        "candidate_id": str(candidate_id),
+        "decision": decision,
+        "confidence": confidence,
+        "reason": reason,
+        "scope_category": truncate(str(data.get("scope_category") or "").strip(), 120),
+        "date_status": truncate(str(data.get("date_status") or "").strip(), 60),
+        "evidence_urls": kept[:5],
+        "uncertainties": uncertainties[:6],
+    }
+
+
+def _default_ai_transport(url: str, headers: dict[str, str], body: bytes, timeout: int) -> dict[str, Any]:
+    request = Request(url, data=body, headers=headers, method="POST")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8", errors="replace"))
+    except HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", errors="replace")[:300]
+        except Exception:  # pragma: no cover - defensive
+            detail = ""
+        raise curator.CuratorError(f"DeepSeek API HTTP {exc.code}: {scrub_secrets(detail)}") from exc
+    except (URLError, TimeoutError) as exc:
+        raise curator.CuratorError(f"DeepSeek API request failed: {scrub_secrets(exc)}") from exc
+    except json.JSONDecodeError as exc:
+        raise curator.CuratorError(f"DeepSeek API returned invalid json: {exc}") from exc
+
+
+def _accumulate_usage(usage: dict[str, int], response: Any) -> None:
+    if not isinstance(response, dict):
+        return
+    reported = response.get("usage")
+    if not isinstance(reported, dict):
+        return
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = reported.get(key)
+        if isinstance(value, (int, float)):
+            usage[key] += int(value)
+
+
+def estimate_ai_cost_usd(usage: dict[str, int], cfg: dict[str, Any]) -> float:
+    return round(
+        usage.get("prompt_tokens", 0) / 1_000_000 * float(cfg["price_input_per_mtok"])
+        + usage.get("completion_tokens", 0) / 1_000_000 * float(cfg["price_output_per_mtok"]),
+        6,
+    )
+
+
+def render_ai_markdown(payload: dict[str, Any]) -> str:
+    lines = [
+        "# AI first-pass review (DeepSeek)",
+        "",
+        f"**Run:** {payload['run']['date']} · **Model:** `{payload['model']}` · **Status:** `{payload['status']}`",
+        f"**Candidates:** reviewed {payload['reviewed']} of {payload['candidates_available']} queued "
+        f"(caps: {payload['budget']['max_candidates_per_run']} candidates / "
+        f"{payload['budget']['max_requests_per_run']} requests per run)",
+        f"**Usage:** {payload['usage']['total_tokens']} tokens over {payload['usage']['requests']} request(s) · "
+        f"estimated cost ≈ ${payload['estimated_cost_usd']:.4f} (upper-bound peak pricing)",
+        "",
+        "> The AI only advises. A maintainer must still verify the paper and record the final decision in "
+        "`reviewed-papers.json` (`accepted` / `excluded` / `other_page`) before any catalogue change.",
+        "",
+    ]
+    if payload["status"] != "ok":
+        lines.append(f"_No API call was made: `{payload['status']}`._")
+        lines.append("")
+    for item in payload["results"]:
+        lines.append(f"## {item.get('candidate_id')}")
+        lines.append("")
+        if item.get("title"):
+            lines.append(f"**{item['title']}**")
+            lines.append("")
+        if item.get("doi"):
+            lines.append(f"- **DOI:** [{item['doi']}](https://doi.org/{item['doi']})")
+        if item.get("journal"):
+            lines.append(f"- **Journal:** {item['journal']}")
+        confidence = item.get("confidence")
+        lines.append(f"- **AI decision:** `{item.get('decision')}`"
+                     + (f" (confidence {confidence:.2f})" if isinstance(confidence, (int, float)) else ""))
+        if item.get("scope_category"):
+            lines.append(f"- **Scope category:** {item['scope_category']}")
+        if item.get("date_status"):
+            lines.append(f"- **Date status:** {item['date_status']}")
+        if item.get("reason"):
+            lines.append(f"- **Reason:** {item['reason']}")
+        if item.get("evidence_urls"):
+            lines.append("- **Evidence:** " + " · ".join(item["evidence_urls"]))
+        if item.get("uncertainties"):
+            lines.append("- **Uncertainties:** " + "; ".join(item["uncertainties"]))
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def run_ai_review(
+    *,
+    repo_root: Path,
+    rules: dict[str, Any],
+    queue: dict[str, Any] | None = None,
+    queue_path: str | Path | None = None,
+    prefix: str | Path = ".curator/weekly",
+    transport: Callable[..., dict[str, Any]] | None = None,
+    api_key: str | None = None,
+    run_date: dt.date | None = None,
+    max_candidates: int | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    cfg = ai_config(rules)
+    if queue is None:
+        candidate_path = Path(queue_path) if queue_path else Path(f"{prefix}-review-queue.json")
+        if not candidate_path.is_absolute():
+            candidate_path = repo_root / candidate_path
+        if not candidate_path.exists():
+            raise curator.CuratorError(f"Review queue not found: {candidate_path}")
+        try:
+            queue = json.loads(candidate_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise curator.CuratorError(f"Could not read review queue {candidate_path}: {exc}") from exc
+    candidates = [item for item in (queue.get("queue") or []) if isinstance(item, dict)]
+    hard_cap = int(cfg["max_candidates_per_run"])
+    limit = hard_cap if max_candidates is None else min(int(max_candidates), hard_cap)
+    selected = candidates[:limit]
+
+    key = (api_key if api_key is not None else os.environ.get(str(cfg["env_api_key"]), "")).strip()
+    if dry_run:
+        status = "dry_run"
+    elif not bool(cfg.get("enabled", True)):
+        status = "disabled"
+    elif not key:
+        status = "skipped_no_api_key"
+    else:
+        status = "ok"
+
+    usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "requests": 0}
+    counts = {"include": 0, "exclude": 0, "needs_human_review": 0, "not_reviewed": 0}
+    results: list[dict[str, Any]] = []
+    url = str(cfg["base_url"]).rstrip("/") + "/chat/completions"
+    max_requests = int(cfg["max_requests_per_run"])
+
+    for index, candidate in enumerate(selected):
+        metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else candidate
+        candidate_id = str(candidate.get("candidate_id") or f"candidate-{index + 1}")
+        doi = curator.normalize_doi(str(metadata.get("doi") or candidate.get("doi") or ""))
+        entry: dict[str, Any] = {
+            "candidate_id": candidate_id,
+            "title": metadata.get("title") or candidate.get("title") or "",
+            "journal": metadata.get("journal") or candidate.get("journal") or "",
+            "doi": doi,
+            "decision": "not_reviewed",
+            "confidence": None,
+            "reason": "",
+            "scope_category": "",
+            "date_status": candidate.get("date_status") or "",
+            "evidence_urls": [],
+            "uncertainties": [],
+        }
+        messages, allowed = build_ai_messages(candidate, rules, cfg)
+        if status != "ok":
+            entry["reason"] = f"AI review {status}; no API call was made."
+            if status == "dry_run":
+                entry["prompt_preview"] = messages[1]["content"][:400]
+            counts["not_reviewed"] += 1
+            results.append(entry)
+            continue
+        if usage["requests"] >= max_requests:
+            entry["reason"] = "Per-run request cap reached; not reviewed."
+            entry["uncertainties"] = ["Increase ai.max_requests_per_run to review more candidates."]
+            counts["not_reviewed"] += 1
+            results.append(entry)
+            continue
+
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {key}"}
+        reviewed: dict[str, Any] | None = None
+        last_error = ""
+        attempts = int(cfg["max_retries"]) + 1
+        for attempt in range(attempts):
+            if usage["requests"] >= max_requests:
+                last_error = "Per-run request cap reached."
+                break
+            attempt_messages = list(messages)
+            if attempt and last_error:
+                attempt_messages = messages + [{
+                    "role": "user",
+                    "content": f"Your previous answer was rejected ({last_error}). "
+                               "Return only the corrected json object.",
+                }]
+            body = json.dumps({
+                "model": cfg["model"],
+                "messages": attempt_messages,
+                "temperature": float(cfg["temperature"]),
+                "max_tokens": int(cfg["max_output_tokens"]),
+                "response_format": {"type": "json_object"},
+                "thinking": {"type": str(cfg.get("thinking") or "disabled")},
+                "stream": False,
+            }, ensure_ascii=False).encode("utf-8")
+            usage["requests"] += 1
+            try:
+                response = (transport or _default_ai_transport)(
+                    url, headers, body, int(cfg["timeout_seconds"]))
+                _accumulate_usage(usage, response)
+                content = ""
+                choices = response.get("choices") if isinstance(response, dict) else None
+                if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                    message = choices[0].get("message")
+                    if isinstance(message, dict):
+                        content = message.get("content") or ""
+                reviewed = parse_ai_reply(content, candidate_id, allowed)
+                break
+            except curator.CuratorError as exc:
+                last_error = scrub_secrets(exc)
+                if attempt + 1 < attempts and usage["requests"] < max_requests:
+                    time.sleep(float(cfg.get("retry_seconds", 2.0)))
+        if reviewed is None:
+            entry["decision"] = "needs_human_review"
+            entry["reason"] = f"AI review failed: {last_error or 'unknown error'}"
+            entry["uncertainties"] = ["AI screening failed; manual review required."]
+            entry["error"] = True
+            counts["needs_human_review"] += 1
+        else:
+            entry.update(reviewed)
+            counts[entry["decision"]] = counts.get(entry["decision"], 0) + 1
+        results.append(entry)
+
+    reviewed_count = sum(1 for item in results
+                         if item.get("decision") != "not_reviewed" and not item.get("error"))
+    absolute_prefix = Path(prefix)
+    if not absolute_prefix.is_absolute():
+        absolute_prefix = repo_root / absolute_prefix
+    absolute_prefix.parent.mkdir(parents=True, exist_ok=True)
+    absolute = {
+        "ai_json": Path(str(absolute_prefix) + "-ai-review.json"),
+        "ai_md": Path(str(absolute_prefix) + "-ai-review.md"),
+    }
+    display_prefix = Path(prefix).as_posix()
+    payload: dict[str, Any] = {
+        "run": {"date": (run_date or today_utc()).isoformat()},
+        "status": status,
+        "model": str(cfg["model"]),
+        "candidates_available": len(candidates),
+        "reviewed": reviewed_count,
+        "budget": {
+            "max_candidates_per_run": hard_cap,
+            "max_requests_per_run": max_requests,
+            "max_output_tokens": int(cfg["max_output_tokens"]),
+            "max_input_chars_per_candidate": int(cfg["max_input_chars_per_candidate"]),
+        },
+        "usage": usage,
+        "estimated_cost_usd": estimate_ai_cost_usd(usage, cfg),
+        "counts": counts,
+        "results": results,
+        "files": {key_name: display_prefix + suffix for key_name, suffix in
+                  (("ai_json", "-ai-review.json"), ("ai_md", "-ai-review.md"))},
+    }
+    write_json(absolute["ai_json"], {
+        "run": payload["run"], "status": status, "model": payload["model"],
+        "budget": payload["budget"], "usage": usage,
+        "estimated_cost_usd": payload["estimated_cost_usd"],
+        "counts": counts, "results": results,
+    })
+    absolute["ai_md"].write_text(render_ai_markdown(payload), encoding="utf-8")
+    return payload
+
+
+# ---------------------------------------------------------------------------
 # CLI entry points (thin wrappers so curator.py stays small)
 # ---------------------------------------------------------------------------
 
@@ -1104,3 +1515,25 @@ def validate_ledger_cli(args: Any, repo_root: Path) -> None:
     print(json.dumps({"valid": not errors, "errors": errors}, ensure_ascii=False, indent=2))
     if errors:
         raise SystemExit(1)
+
+
+def ai_review_cli(args: Any, repo_root: Path) -> None:
+    rules = curator.load_rules()
+    payload = run_ai_review(
+        repo_root=repo_root,
+        rules=rules,
+        queue_path=args.queue,
+        prefix=args.prefix,
+        max_candidates=args.max_candidates,
+        dry_run=bool(args.dry_run),
+    )
+    print(json.dumps({
+        "status": payload["status"],
+        "model": payload["model"],
+        "candidates_available": payload["candidates_available"],
+        "reviewed": payload["reviewed"],
+        "counts": payload["counts"],
+        "usage": payload["usage"],
+        "estimated_cost_usd": payload["estimated_cost_usd"],
+        "files": payload["files"],
+    }, ensure_ascii=False, indent=2))

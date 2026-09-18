@@ -28,7 +28,7 @@ on:
           - "25"
           - "50"
 
-# Deterministic discovery v2 is read-only: it cannot change the repository.
+# Discovery and AI screening are read-only: they cannot change the repository.
 permissions:
   contents: read
 
@@ -74,6 +74,19 @@ jobs:
             --queue-limit "$QUEUE_LIMIT" \
             --prefix .curator/weekly
 
+      - name: AI first-pass review (optional, read-only, hard-capped)
+        if: success()
+        env:
+          # Store the key in the fork's Actions secrets. The job records token
+          # usage and an estimated cost and never writes the key anywhere.
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          python .agents/skills/biomedical-image-curator/scripts/curator.py \
+            --repo . \
+            ai-review \
+            --queue .curator/weekly-review-queue.json \
+            --prefix .curator/weekly
+
       - name: Show the report in the run summary
         if: success()
         run: |
@@ -82,6 +95,7 @@ jobs:
             echo "";
             cat .curator/weekly-summary.md;
             echo "";
+            if [ -f .curator/weekly-ai-review.md ]; then cat .curator/weekly-ai-review.md; echo ""; fi;
             echo "**How to act on the queue:** download the biomedical-image-candidates artifact (30-day retention), open weekly-review-queue.md, verify each entry against the skill policy, and record your decisions in reviewed-papers.json (accepted/excluded/other_page) in a normal human-reviewed pull request. The workflow never edits the catalogue.";
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -95,5 +109,7 @@ jobs:
             .curator/weekly-review-queue.md
             .curator/weekly-raw-audit.json
             .curator/weekly-summary.md
+            .curator/weekly-ai-review.json
+            .curator/weekly-ai-review.md
           if-no-files-found: warn
           retention-days: 30
