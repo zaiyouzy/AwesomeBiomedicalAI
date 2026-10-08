@@ -1,7 +1,8 @@
-name: Weekly biomedical image paper discovery
+name: Biweekly biomedical image paper discovery
 
 on:
-  # Run automatically once a week. GitHub schedules use UTC.
+  # Check every Monday at 13:17 UTC. The cadence job allows a scan every
+  # other week, anchored to 2026-10-12; off weeks never call discovery or AI.
   schedule:
     - cron: "17 13 * * 1"
 
@@ -37,9 +38,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  discover:
-    # Fork-only safety guard. If this file is copied upstream, the job is skipped.
+  cadence:
+    # Fork-only safety guard. If this file is copied upstream, nothing runs.
     if: github.repository == 'zaiyouzy/AwesomeBiomedicalAI'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.cadence.outputs.run }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Check the biweekly schedule
+        id: cadence
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SCHEDULE_ANCHOR: "2026-10-12"
+        run: >-
+          python3 .agents/skills/biomedical-image-curator/scripts/schedule.py
+          --event "$EVENT_NAME"
+          --anchor "$SCHEDULE_ANCHOR"
+          >> "$GITHUB_OUTPUT"
+
+      - name: Show the schedule decision
+        env:
+          SCHEDULE_REASON: ${{ steps.cadence.outputs.reason }}
+        run: echo "$SCHEDULE_REASON" >> "$GITHUB_STEP_SUMMARY"
+
+  discover:
+    needs: cadence
+    if: needs.cadence.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 

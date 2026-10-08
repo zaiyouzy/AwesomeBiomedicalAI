@@ -4,9 +4,26 @@ This file explains the deterministic discovery stage (`discover-v2`) for a
 non-technical maintainer: what it does, what it produces, how to act on the
 queue, and how the reviewed-papers ledger works.
 
-## What the weekly Action does
+## What the biweekly Action does
 
-Every Monday (and on demand from the Actions page) the read-only workflow:
+Every other Monday at 13:17 UTC, starting on **2026-10-12** (and on demand
+from the Actions page), the read-only workflow runs discovery v2 and optional
+DeepSeek review. Scheduled scans are due on 2026-10-12, 2026-10-26,
+2026-11-09, and every 14 days after that.
+
+GitHub's cron checks every Monday; a small `schedule.py` gate skips the entire
+discovery job on off weeks, including tests, external searches and AI calls.
+The gate uses alternating weeks from the fixed Monday anchor, rather than
+ISO week numbers, so it stays correct across year boundaries and tolerates
+a delayed run within the same week. Manual `workflow_dispatch` runs always
+proceed. The workflow is deployed on the fork's default `main`; this replaces
+the old v1 scheduled workflow at the same path. No push trigger is configured.
+
+The 21-day lookback plus 3-day overlap remains unchanged and covers the
+14-day scan interval. Existing `weekly-*` report filenames are retained for
+compatibility; they are produced once per scan, not necessarily every week.
+
+Each scan:
 
 1. Runs the Python unit tests.
 2. Searches **PubMed in two complementary passes** over a **rolling 21-day
