@@ -1,0 +1,4 @@
+interface:
+  display_name: "Biomedical Image Curator"
+  short_description: "Curate Nature biomedical-imaging papers into the catalogue"
+  default_prompt: "Use $biomedical-image-curator to check a paper or discover candidates for biomedical_images.md."
